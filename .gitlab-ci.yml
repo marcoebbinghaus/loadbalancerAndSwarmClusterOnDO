@@ -1,0 +1,60 @@
+image: maven:latest
+
+services:
+  - docker:dind
+
+cache:
+  paths:
+    - .m2/repository
+
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_DRIVER: overlay2
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository"
+
+stages:
+  - deploy-infrastructure
+  - deploy-services
+
+deploy-infrastructure:
+  stage: deploy-infrastructure
+  image:
+    name: hashicorp/terraform:light
+    entrypoint:
+      - '/usr/bin/env'
+      - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+  before_script:
+    - apk add --no-cache curl
+    - mkdir -p ~/.ssh
+    - echo "$TF_VAR_DO_PRIVKEY_PLAIN" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod -R 700 ~/.ssh
+  script:
+    - cd .infrastructure/live/cluster
+    - terraform init
+    - terraform plan
+    - terraform apply -auto-approve
+  only:
+    - master
+
+deploy-services:
+  stage: deploy-services
+  before_script:
+    - echo "deb http://ppa.launchpad.net/ansible/ansible/ubuntu trusty main" >> /etc/apt/sources.list
+    - apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 93C4A3FD7BB9C367
+    - apt-get update
+    - apt-get install ansible -y
+    - apt-get install jq -y
+  script:
+    - mkdir -p /root/.ssh
+    - echo "$TF_VAR_DO_PRIVKEY_PLAIN" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod -R 700 ~/.ssh
+    - "GOTCHA_MASTER_IP=$(curl -sX GET https://api.digitalocean.com/v2/droplets -H \"Authorization: Bearer $TF_VAR_DO_TOKEN\" | jq -c '.droplets[] | select(.name | contains(\"gotchamaster00\")).networks.v4[0]'.ip_address)" # extrahieren der IP-Adresse von gotchamaster00 via DO-API und jq anhand des dropletnamens
+    - GOTCHA_MASTER_IP="${GOTCHA_MASTER_IP%\"}"
+    - GOTCHA_MASTER_IP="${GOTCHA_MASTER_IP#\"}"
+    - echo "$GOTCHA_MASTER_IP"
+    - export GOTCHA_MASTER_IP
+    - echo $GOTCHA_MASTER_IP > /etc/ansible/hosts
+    - scp -o StrictHostKeyChecking=no docker-compose.yml root@$GOTCHA_MASTER_IP:/root/docker-compose.yml
+    - ansible all --user=root -a "docker stack deploy --compose-file docker-compose.yml --with-registry-auth gotcha"
+  only:
+    - master

@@ -1,0 +1,8 @@
+.idea/
+**/.terraform/*
+.idea/dictionaries
+out/
+**/target/*
+**/secrets/*
+*.iml
+**/*.tfstate*

@@ -1,0 +1,42 @@
+version: "3.6"
+services:
+  traefik:
+    image: traefik:v1.6.6
+    command:
+      - "--web"
+      - "--entrypoints=Name:http Address::80"
+      - "--defaultentrypoints=http"
+      - "--docker"
+      - "--docker.swarmMode"
+      - "--docker.domain=gotcha-app.de"
+      - "--docker.watch"
+      - "--logLevel=DEBUG"
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+    networks:
+      - gotcha-net
+  whoami:
+    image: stefanscherer/whoami
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == worker
+      labels:
+      - "traefik.port=8080"
+      - "traefik.backend=whoami"
+      - "traefik.frontend.rule=Host:gotcha-app.de"
+    depends_on:
+      - traefik
+    networks:
+      - gotcha-net
+networks:
+  gotcha-net:
+    external: true
